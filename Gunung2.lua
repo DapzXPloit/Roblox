@@ -249,13 +249,21 @@ local function read_last_file()
 end
 
 -- === Rayfield UI ===
+-- Load Rayfield (tetap seperti semula)
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-    Name = "[Marker Saver] ⛰️ DapzXPloit",
-    LoadingTitle = "Loading Marker Saver...",
-    LoadingSubtitle = "DapzXTeam",
-    ConfigurationSaving = { Enabled = false },
+    Name = "[EXCLUSIVE] ⛰️Mount Project - DapzXPloit",
+    Icon = 0,
+    LoadingTitle = "Loading script...🪩",
+    LoadingSubtitle = "Powered by DapzXTeam",
+    ShowText = "DapzXPloit",
+    Theme = "Default",
+    ConfigurationSaving = {
+        Enabled = false, 
+        FolderName = "DapzXTeam",
+        FileName = "DapzXPloit"
+    },
     DisableRayfieldPrompts = true,
 })
 
