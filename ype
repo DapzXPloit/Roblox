@@ -1,0 +1,57 @@
+-- ✅ TEST SCRIPT DELTA EXECUTOR
+-- Pastikan file disimpan UTF-8 tanpa BOM agar tidak error
+
+local s, guiError = pcall(function()
+    -- GUI utama
+    local gui = Instance.new("ScreenGui", game:GetService("CoreGui"))
+    gui.Name = "DeltaUITest"
+
+    local frame = Instance.new("Frame", gui)
+    frame.Size = UDim2.new(0, 420, 0, 280)
+    frame.Position = UDim2.new(0.3, 0, 0.25, 0)
+    frame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+    frame.BorderSizePixel = 0
+    frame.Active = true
+    frame.Draggable = true
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 20)
+
+    local title = Instance.new("TextLabel", frame)
+    title.Size = UDim2.new(1, 0, 0, 40)
+    title.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+    title.Text = "✅ Delta Executor UI Test"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 18
+    title.BorderSizePixel = 0
+    Instance.new("UICorner", title).CornerRadius = UDim.new(0, 20)
+
+    local btn = Instance.new("TextButton", frame)
+    btn.Size = UDim2.new(0.6, 0, 0, 40)
+    btn.Position = UDim2.new(0.2, 0, 0.5, 0)
+    btn.BackgroundColor3 = Color3.fromRGB(80, 130, 200)
+    btn.TextColor3 = Color3.new(1, 1, 1)
+    btn.Text = "Klik untuk Tes!"
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 16
+    btn.BorderSizePixel = 0
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 12)
+
+    local status = Instance.new("TextLabel", frame)
+    status.Size = UDim2.new(1, -20, 0, 25)
+    status.Position = UDim2.new(0, 10, 1, -35)
+    status.BackgroundTransparency = 1
+    status.TextColor3 = Color3.fromRGB(255, 255, 255)
+    status.Font = Enum.Font.Gotham
+    status.Text = "Status: Menunggu klik..."
+    status.TextSize = 14
+    status.TextXAlignment = Enum.TextXAlignment.Left
+
+    btn.MouseButton1Click:Connect(function()
+        status.Text = "Status: Tombol berhasil diklik ✅"
+        btn.BackgroundColor3 = Color3.fromRGB(100, 180, 100)
+    end)
+end)
+
+if not s then
+    warn("❌ Gagal membuat GUI:", guiError)
+end
