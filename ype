@@ -1,57 +1,189 @@
--- ✅ TEST SCRIPT DELTA EXECUTOR
--- Pastikan file disimpan UTF-8 tanpa BOM agar tidak error
+--[[
+    Marker Saver Script - Kompatibel dengan Delta Executor
+    Disesuaikan agar berfungsi dengan baik di Delta Executor.
+--]]
 
-local s, guiError = pcall(function()
-    -- GUI utama
-    local gui = Instance.new("ScreenGui", game:GetService("CoreGui"))
-    gui.Name = "DeltaUITest"
+local Rayfield = loadstring(game:HttpGet('https://raw.githubusercontent.com/SirWeebington/Rayfield/main/Rayfield.lua'))()
 
-    local frame = Instance.new("Frame", gui)
-    frame.Size = UDim2.new(0, 420, 0, 280)
-    frame.Position = UDim2.new(0.3, 0, 0.25, 0)
-    frame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-    frame.BorderSizePixel = 0
-    frame.Active = true
-    frame.Draggable = true
-    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 20)
+local Window = Rayfield:CreateTab("Marker Saver - MarV", "icon")
 
-    local title = Instance.new("TextLabel", frame)
-    title.Size = UDim2.new(1, 0, 0, 40)
-    title.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
-    title.Text = "✅ Delta Executor UI Test"
-    title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 18
-    title.BorderSizePixel = 0
-    Instance.new("UICorner", title).CornerRadius = UDim.new(0, 20)
+local MainTab = Window:CreateSection("Main Controls")
+local FilesTab = Window:CreateSection("Files")
+local CheckpointsTab = Window:CreateSection("Checkpoints")
 
-    local btn = Instance.new("TextButton", frame)
-    btn.Size = UDim2.new(0.6, 0, 0, 40)
-    btn.Position = UDim2.new(0.2, 0, 0.5, 0)
-    btn.BackgroundColor3 = Color3.fromRGB(80, 130, 200)
-    btn.TextColor3 = Color3.new(1, 1, 1)
-    btn.Text = "Klik untuk Tes!"
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 16
-    btn.BorderSizePixel = 0
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 12)
+-- Variabel
+local Checkpoints = {}
+local CurrentCheckpoint = 1
+local AutoLoopEnabled = false
+local RespawnEnabled = false
+local DelayTime = 0.01
+local SaveFileName = "markers"
 
-    local status = Instance.new("TextLabel", frame)
-    status.Size = UDim2.new(1, -20, 0, 25)
-    status.Position = UDim2.new(0, 10, 1, -35)
-    status.BackgroundTransparency = 1
-    status.TextColor3 = Color3.fromRGB(255, 255, 255)
-    status.Font = Enum.Font.Gotham
-    status.Text = "Status: Menunggu klik..."
-    status.TextSize = 14
-    status.TextXAlignment = Enum.TextXAlignment.Left
+-- Fungsi untuk menampilkan notifikasi
+local function SafeNotify(text)
+    Rayfield:Notify({
+        Title = "Marker Saver",
+        Content = text,
+        Duration = 5,
+        Image = 4483362458,
+        Actions = {
+            {
+                Name = "Okay!",
+                Callback = function()
+                    print("Notifikasi ditutup")
+                end
+            }
+        }
+    })
+end
 
-    btn.MouseButton1Click:Connect(function()
-        status.Text = "Status: Tombol berhasil diklik ✅"
-        btn.BackgroundColor3 = Color3.fromRGB(100, 180, 100)
+-- Fungsi untuk menyimpan checkpoint ke file (Kompatibel dengan Delta)
+local function SaveToFile()
+    local data = game:GetService("HttpService"):JSONEncode(Checkpoints)
+    local file = io.open(SaveFileName .. ".json", "w")
+    if file then
+        file:write(data)
+        file:close()
+        SafeNotify("Checkpoint disimpan ke file: " .. SaveFileName .. ".json")
+    else
+        SafeNotify("Gagal menyimpan file.")
+    end
+end
+
+-- Fungsi untuk memuat checkpoint dari file (Kompatibel dengan Delta)
+local function LoadFromFile()
+    local file = io.open(SaveFileName .. ".json", "r")
+    if file then
+        local data = file:read("*a")
+        file:close()
+        Checkpoints = game:GetService("HttpService"):JSONDecode(data)
+        SafeNotify("Checkpoint dimuat dari file: " .. SaveFileName .. ".json")
+        UpdateCheckpointUI()
+    else
+        SafeNotify("File tidak ditemukan: " .. SaveFileName .. ".json")
+    end
+end
+
+-- Fungsi untuk teleportasi ke checkpoint
+local function TeleportToCheckpoint(index)
+    local player = game.Players.LocalPlayer
+    local character = player.Character
+    if character and character:FindFirstChild("HumanoidRootPart") then
+        local position = Checkpoints[index]
+        if position then
+            character.HumanoidRootPart.CFrame = CFrame.new(position.X, position.Y, position.Z)
+            SafeNotify("Teleport ke checkpoint " .. index)
+        else
+            SafeNotify("Checkpoint tidak valid")
+        end
+    else
+        SafeNotify("Karakter tidak ditemukan")
+    end
+end
+
+-- Fungsi untuk menghapus checkpoint
+local function DeleteCheckpoint(index)
+    table.remove(Checkpoints, index)
+    SafeNotify("Checkpoint " .. index .. " dihapus")
+    UpdateCheckpointUI()
+end
+
+-- Fungsi untuk membuat tombol checkpoint
+local function CreateCheckpointButton(index)
+	local CheckpointSection = CheckpointsTab:CreateSection("Checkpoint " .. index)
+
+    CheckpointSection:CreateButton("TP", function()
+        TeleportToCheckpoint(index)
     end)
+
+    CheckpointSection:CreateButton("EDIT", function()
+        -- Tambahkan logika edit di sini
+        SafeNotify("Fitur Edit belum diimplementasikan")
+    end)
+
+    CheckpointSection:CreateButton("DEL", function()
+        DeleteCheckpoint(index)
+    end)
+end
+
+-- Fungsi untuk memperbarui UI checkpoint
+local function UpdateCheckpointUI()
+    -- Hapus semua section checkpoint yang ada
+    for i = 1, #CheckpointsTab.Sections do
+        if string.find(CheckpointsTab.Sections[i].Label, "Checkpoint") then
+            CheckpointsTab:RemoveSection(CheckpointsTab.Sections[i])
+        end
+    end
+
+    -- Buat ulang tombol checkpoint
+    for i = 1, #Checkpoints do
+        CreateCheckpointButton(i)
+    end
+end
+
+-- Tombol AutoLoop
+local AutoLoopButton = MainTab:CreateButton("AutoLoop ON", function()
+    AutoLoopEnabled = not AutoLoopEnabled
+    if AutoLoopEnabled then
+        AutoLoopButton:SetLabel("AutoLoop OFF")
+        SafeNotify("AutoLoop diaktifkan")
+    else
+        AutoLoopButton:SetLabel("AutoLoop ON")
+        SafeNotify("AutoLoop dinonaktifkan")
+    end
 end)
 
-if not s then
-    warn("❌ Gagal membuat GUI:", guiError)
-end
+-- Tombol Save CP
+MainTab:CreateButton("Save CP", function()
+    local player = game.Players.LocalPlayer
+    local character = player.Character
+    if character and character:FindFirstChild("HumanoidRootPart") then
+        local position = character.HumanoidRootPart.Position
+        table.insert(Checkpoints, position)
+        SafeNotify("Checkpoint disimpan: " .. #Checkpoints)
+        UpdateCheckpointUI()
+    else
+        SafeNotify("Karakter tidak ditemukan")
+    end
+end)
+
+-- Tombol Delete All
+MainTab:CreateButton("Delete All", function()
+    Checkpoints = {}
+    CurrentCheckpoint = 1
+    SafeNotify("Semua checkpoint dihapus")
+    UpdateCheckpointUI()
+end)
+
+-- Tombol Save File
+FilesTab:CreateButton("Save File", function()
+    SaveToFile()
+end)
+
+-- Tombol Load File
+FilesTab:CreateButton("Load File", function()
+    LoadFromFile()
+end)
+
+-- Tombol Respawn
+local RespawnButton = MainTab:CreateButton("Respawn OFF", function()
+    RespawnEnabled = not RespawnEnabled
+    if RespawnEnabled then
+        RespawnButton:SetLabel("Respawn ON")
+        SafeNotify("Respawn diaktifkan")
+    else
+        RespawnButton:SetLabel("Respawn OFF")
+        SafeNotify("Respawn dinonaktifkan")
+    end
+end)
+
+-- Input Delay
+MainTab:CreateInput("Ganti Delay (0.01)", function(text)
+    DelayTime = tonumber(text) or 0.01
+    SafeNotify("Delay diubah menjadi: " .. DelayTime)
+end)
+
+-- Inisialisasi UI
+UpdateCheckpointUI()
+
+Rayfield:LoadUI()
