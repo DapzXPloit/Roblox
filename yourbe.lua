@@ -4,7 +4,7 @@
 -- =========================
 
 -- Ganti webhook URL mu disini
-local webhookURL = "https://discord.com/api/webhooks/142115861747230/npCLU3TMgoA9IPgI9FhBX73lw6y6_fSRQGKVWl"
+local webhookURL = "https://discord.com/api/webhooks/1421153532861747230/npCLU35K2XPTMgo7HTD26_nRjR8gwYOD3GianMN3A9IPgI9FhBX73lw6y6_fSRQGKVWl"
 
 -- Services (utama)
 local Players = game:GetService("Players")
@@ -223,7 +223,10 @@ local Window = Rayfield:CreateWindow({
 --  Global Defaults / Vars
 -- =========================
 getgenv().Checkpoints = {
-{Name = "Spawn", Pos = Vector3.new()},
+{Name = "Spawn", Pos = Vector3.new(-925.52, 371.61, 37.74)},
+{Name = "Checkpoint 1", Pos = Vector3.new(-903.17, 364.01, -428.28)},
+{Name = "Checkpoint 2", Pos = Vector3.new(-602.62, 421.12, -545.52)},
+{Name = "Summit", Pos = Vector3.new(2496.26, 2223.81, 15.70)},
 }
 getgenv().CurrentCheckpoint = 1
 getgenv().AutoSummitLoop = false
@@ -432,132 +435,137 @@ CopyTab:CreateButton({
 })
 
 -- =========================
--- Tambahan: Save / Load File Checkpoint System (tahan banting)
--- Paste tepat di bawah tombol "Copy All Checkpoints"
+-- ✅ Sistem Save / Load Checkpoint (Final Versi untuk Delta Android)
 -- =========================
-
--- Detect file api helpers (variasi nama di beberapa executor)
-local function hasFileApi()
-    return (type(isfolder) == "function" and type(makefolder) == "function") or
-           (type(writefile) == "function" and type(readfile) == "function") or
-           (type(writefile) == "function") or (type(writefile) == "userdata")
-end
-
-local function safeIsFolder(p)
-    if type(isfolder) == "function" then return isfolder(p) end
-    return false
-end
-local function safeMakeFolder(p)
-    if type(makefolder) == "function" then return makefolder(p) end
-    return nil
-end
-local function safeIsFile(p)
-    if type(isfile) == "function" then return isfile(p) end
-    return false
-end
-local function safeWriteFile(path, data)
-    if type(writefile) == "function" then return writefile(path, data) end
-    return error("writefile not supported")
-end
-local function safeReadFile(path)
-    if type(readfile) == "function" then return readfile(path) end
-    return error("readfile not supported")
-end
-local function safeListFiles(dir)
-    if type(listfiles) == "function" then return listfiles(dir) end
-    -- Some executors don't have listfiles; try to read folder by listing common names (not reliable)
-    return {}
-end
-
+local HttpService = game:GetService("HttpService")
 local SaveFolder = "DapzXTeam/Checkpoint"
--- make folder (if possible)
-pcall(function()
-    if not safeIsFolder(SaveFolder) then
-        pcall(function() safeMakeFolder(SaveFolder) end)
-    end
-end)
 
--- get saved files (returns array of names without .json)
-local function getSavedFiles()
-    local names = {}
-    local ok, files = pcall(safeListFiles, SaveFolder)
-    if not ok or not files then return names end
-    for _, f in ipairs(files) do
-        -- support trailing slash or backslash
-        local name = f:match("([^/\\]+)%.json$")
-        if name then table.insert(names, name) end
-    end
-    return names
+if not isfolder(SaveFolder) then
+    makefolder(SaveFolder)
 end
 
--- Save helper (json)
+-- =========================
+-- Fungsi aman untuk file (biar ga error di Delta)
+-- =========================
+local function safeWriteFile(path, data)
+    local ok, err = pcall(function() writefile(path, data) end)
+    return ok
+end
+
+local function safeReadFile(path)
+    local ok, res = pcall(function() return readfile(path) end)
+    if ok then return res else return nil end
+end
+
+local function safeIsFile(path)
+    local ok, res = pcall(function() return isfile(path) end)
+    return ok and res
+end
+
+-- =========================
+-- Notifikasi aman pakai Rayfield
+-- =========================
+local function SafeNotify(tbl)
+    pcall(function()
+        Rayfield:Notify({
+            Title = tbl.Title or "Info",
+            Content = tbl.Content or "",
+            Duration = tbl.Duration or 3
+        })
+    end)
+end
+
+-- =========================
+-- Save checkpoint ke file JSON
+-- =========================
 local function saveCheckpointToFile(fileName, checkpoints)
     if not fileName or fileName == "" then
         SafeNotify({Title="⚠️ Save File", Content="Nama file tidak boleh kosong!", Duration=3})
         return
     end
     if #checkpoints == 0 then
-        SafeNotify({Title="⚠️ Save File", Content="Tidak ada checkpoint untuk disimpan!", Duration=3})
+        SafeNotify({Title="⚠️ Save File", Content="Belum ada checkpoint untuk disimpan!", Duration=3})
         return
     end
 
-    local payload = {Checkpoints = checkpoints}
-    local ok, json = pcall(function() return HttpService:JSONEncode(payload) end)
-    if not ok then
-        SafeNotify({Title="❌ Save File", Content="Gagal encode data JSON", Duration=4})
-        return
-    end
+    local data = {Checkpoints = checkpoints}
+    local json = HttpService:JSONEncode(data)
+    local path = SaveFolder.."/"..fileName..".json"
+    local ok = safeWriteFile(path, json)
 
-    local path = SaveFolder .. "/" .. fileName .. ".json"
-    local success, err = pcall(function() safeWriteFile(path, json) end)
-    if success then
-        SafeNotify({Title="💾 Save File", Content="Berhasil menyimpan: " .. fileName .. ".json", Duration=3})
-        -- update dropdown options if possible (try multiple methods)
-        pcall(function()
-            if dropdownObject and type(dropdownObject.Refresh) == "function" then
-                dropdownObject:Refresh(getSavedFiles())
-            elseif dropdownObject and type(dropdownObject.UpdateOptions) == "function" then
-                dropdownObject:UpdateOptions(getSavedFiles())
-            end
-        end)
+    if ok then
+        SafeNotify({Title="💾 Save File", Content="Berhasil menyimpan ke "..fileName..".json", Duration=3})
     else
-        SafeNotify({Title="❌ Save File", Content="Tidak dapat menulis file: fungsi writefile tidak tersedia", Duration=5})
-        warn("SaveFile error:", err)
+        SafeNotify({Title="❌ Save File", Content="Gagal menyimpan file!", Duration=3})
     end
 end
 
--- Load helper
+-- =========================
+-- Load checkpoint dari file JSON
+-- =========================
 local function loadCheckpointFromFile(fileName)
     if not fileName or fileName == "" then
         SafeNotify({Title="⚠️ Load File", Content="Pilih file terlebih dahulu!", Duration=3})
         return
     end
-    local path = SaveFolder .. "/" .. fileName .. ".json"
+
+    local path = SaveFolder.."/"..fileName..".json"
     if not safeIsFile(path) then
-        SafeNotify({Title="⚠️ Load File", Content="File tidak ditemukan atau executor tidak support isfile/listfiles", Duration=4})
+        SafeNotify({Title="⚠️ Load File", Content="File tidak ditemukan: "..fileName, Duration=3})
         return
     end
 
-    local success, content = pcall(function() return safeReadFile(path) end)
-    if not success or not content then
-        SafeNotify({Title="❌ Load File", Content="Gagal membaca file (readfile tidak tersedia?)", Duration=4})
+    local content = safeReadFile(path)
+    if not content then
+        SafeNotify({Title="❌ Load File", Content="Gagal membaca isi file!", Duration=3})
         return
     end
 
     local ok, decoded = pcall(function() return HttpService:JSONDecode(content) end)
     if not ok or type(decoded) ~= "table" or type(decoded.Checkpoints) ~= "table" then
-        SafeNotify({Title="❌ Load File", Content="Format file tidak valid.", Duration=4})
+        SafeNotify({Title="❌ Load File", Content="Format file tidak valid.", Duration=3})
         return
     end
 
-    CopyPositionBuffer = decoded.Checkpoints or {}
+    -- konversi tabel posisi jadi string "x, y, z"
+    local fixed = {}
+    for _, v in ipairs(decoded.Checkpoints) do
+        if type(v) == "table" and v.x and v.y and v.z then
+            table.insert(fixed, string.format("%f, %f, %f", v.x, v.y, v.z))
+        elseif type(v) == "string" then
+            table.insert(fixed, v)
+        end
+    end
+
+    CopyPositionBuffer = fixed
     SafeNotify({Title="📂 Load File", Content="Berhasil memuat: "..fileName, Duration=3})
 end
 
--- UI: Add save/load controls under existing CopyTab (minimal perubahan)
-CopyTab:CreateParagraph({Title="💾 Save / Load Checkpoint", Content="Simpan hasil CopyPos agar tidak hilang saat keluar game."})
+-- =========================
+-- Ambil daftar file tersimpan
+-- =========================
+local function getSavedFiles()
+    local files = {}
+    local ok, list = pcall(function() return listfiles(SaveFolder) end)
+    if ok and list then
+        for _, f in ipairs(list) do
+            local name = f:match("([^/]+)%.json$")
+            if name then table.insert(files, name) end
+        end
+    end
+    return files
+end
 
-local SelectedFile = ""
+-- =========================
+-- UI di Tab CopyPos
+-- =========================
+CopyTab:CreateParagraph({
+    Title="💾 Save / Load Checkpoint",
+    Content="Simpan & muat posisi hasil CopyPos."
+})
+
+local SelectedFile = nil
+
 local SaveFileInput = CopyTab:CreateInput({
     Name = "Masukkan nama file...",
     PlaceholderText = "Nama file tanpa .json",
@@ -570,70 +578,32 @@ local SaveFileInput = CopyTab:CreateInput({
 CopyTab:CreateButton({
     Name = "💾 Save Sekarang",
     Callback = function()
-        if not hasFileApi() then
-            SafeNotify({Title="❌ Save File", Content="Executor kamu mungkin tidak mendukung operasi file (writefile/readfile).", Duration=5})
-            return
-        end
-        if not SelectedFile or SelectedFile == "" then
-            SafeNotify({Title="⚠️ Save File", Content="Isi nama file terlebih dahulu!", Duration=3})
-            return
-        end
         saveCheckpointToFile(SelectedFile, CopyPositionBuffer)
     end
 })
 
--- build initial dropdown options
-local initialOptions = getSavedFiles()
--- keep reference to dropdown if Rayfield returns object (some Rayfield return object, some do not)
-local dropdownObject = nil
--- create dropdown (store return if available)
-pcall(function()
-    dropdownObject = CopyTab:CreateDropdown({
-        Name = "Pilih File...",
-        Options = initialOptions,
-        CurrentOption = initialOptions[1],
-        Callback = function(Value)
-            SelectedFile = Value
-        end
-    })
-end)
+local FileDropdown = CopyTab:CreateDropdown({
+    Name = "Pilih File...",
+    Options = getSavedFiles(),
+    CurrentOption = nil,
+    Callback = function(Value)
+        SelectedFile = Value
+    end
+})
 
 CopyTab:CreateButton({
     Name = "📂 Load Sekarang",
     Callback = function()
-        if not hasFileApi() then
-            SafeNotify({Title="❌ Load File", Content="Executor tidak mendukung operasi file (readfile/isfile).", Duration=5})
-            return
-        end
-        if not SelectedFile or SelectedFile == "" then
-            SafeNotify({Title="⚠️ Load File", Content="Pilih file terlebih dahulu!", Duration=3})
-            return
-        end
         loadCheckpointFromFile(SelectedFile)
     end
 })
 
--- After save, try to update dropdown options (best-effort)
--- also expose small helper to refresh dropdown options (non-UI)
-local function refreshDropdownOptions()
-    local opts = getSavedFiles()
-    pcall(function()
-        if dropdownObject and type(dropdownObject.Refresh) == "function" then
-            dropdownObject:Refresh(opts)
-        elseif dropdownObject and type(dropdownObject.UpdateOptions) == "function" then
-            dropdownObject:UpdateOptions(opts)
-        else
-            -- some Rayfield versions don't return the dropdown object; fallback: create a new invisible paragraph to hint user to re-open UI
-            -- but we won't change UI layout; instead just notify
-            SafeNotify({Title="ℹ️ Refresh", Content="Daftar file diperbarui (reload UI jika tidak muncul).", Duration=3})
-        end
-    end)
-end
-
--- ensure we refresh after saving (best-effort)
--- wrap original save function with refresh attempt
-local oldSave = saveCheckpointToFile
-saveCheckpointToFile = function(fileName, checkpoints)
-    oldSave(fileName, checkpoints)
-    pcall(refreshDropdownOptions)
-end
+-- Auto-refresh daftar file
+task.spawn(function()
+    while task.wait(3) do
+        local files = getSavedFiles()
+        pcall(function()
+            FileDropdown:Refresh(files)
+        end)
+    end
+end)
