@@ -1,17 +1,17 @@
--- Marker Saver - DapzXPloit (V2)
--- Delta-friendly final version
--- Save file as UTF-8 (no BOM). Paste whole file.
+-- Marker Saver - DapzXPloit (V3.5)
+-- Delta-ready. Save as UTF-8 without BOM.
 
--- ========== Services & Env ==========
+-- Services
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
+local StarterGui = game:GetService("StarterGui")
 local RunService = game:GetService("RunService")
 
 local localPlayer = Players.LocalPlayer
 local PLACE_ID = tostring(game.PlaceId or 0)
 
--- ========== Executor capability detection ==========
+-- Executor capability detection
 local has_writefile  = type(writefile) == "function"
 local has_readfile   = type(readfile) == "function"
 local has_isfolder   = type(isfolder) == "function"
@@ -26,11 +26,30 @@ local SAVE_FOLDER = SAVE_ROOT .. "/" .. PLACE_ID
 local INDEX_PATH = SAVE_FOLDER .. "/__index.json"
 local LAST_PATH = SAVE_FOLDER .. "/__last.txt"
 
--- ========== Helpers: file system & index ==========
+-- Defaults
+local Checkpoints = {
+    {Name="Spawn", Pos=Vector3.new(-925.52,371.61,37.74)},
+    {Name="Checkpoint 1", Pos=Vector3.new(-903.17,364.01,-428.28)},
+    {Name="Checkpoint 2", Pos=Vector3.new(-602.62,421.12,-545.52)},
+    {Name="Summit", Pos=Vector3.new(2496.26,2223.81,15.70)},
+}
+local AutoLoop = false
+local AutoDelay = 1
+local AutoRespawn = false
+
+-- Utility: safe wait
+local function safe_wait(t)
+    if type(t) ~= "number" then t = 0.1 end
+    pcall(task.wait, t)
+end
+
+-- File helpers
 local function ensure_folder()
     if has_isfolder and has_makefolder then
-        if not isfolder(SAVE_ROOT) then pcall(makefolder, SAVE_ROOT) end
-        if not isfolder(SAVE_FOLDER) then pcall(makefolder, SAVE_FOLDER) end
+        pcall(function()
+            if not isfolder(SAVE_ROOT) then makefolder(SAVE_ROOT) end
+            if not isfolder(SAVE_FOLDER) then makefolder(SAVE_FOLDER) end
+        end)
     end
 end
 
@@ -49,8 +68,8 @@ end
 
 local function delete_file(path)
     if has_delfile then
-        if type(delfile) == "function" then pcall(delfile, path) end
-        if type(deletefile) == "function" then pcall(deletefile, path) end
+        pcall(function() if type(delfile)=="function" then delfile(path) end end)
+        pcall(function() if type(deletefile)=="function" then deletefile(path) end end)
     else
         if has_writefile then pcall(writefile, path, "") end
     end
@@ -104,17 +123,13 @@ local function list_saved_files()
     return out
 end
 
--- ========== Checkpoint serialization ==========
+-- Serialization helpers
 local function serialize_checkpoints(tbl)
     local out = {}
     for i,cp in ipairs(tbl) do
         local pos = cp.Pos
         local x,y,z = 0,0,0
-        pcall(function()
-            x = tonumber(pos.X) or x
-            y = tonumber(pos.Y) or y
-            z = tonumber(pos.Z) or z
-        end)
+        pcall(function() x = tonumber(pos.X) or x; y = tonumber(pos.Y) or y; z = tonumber(pos.Z) or z end)
         table.insert(out, {Name = tostring(cp.Name or ("Checkpoint_"..i)), Pos = {X=x,Y=y,Z=z}})
     end
     return HttpService:JSONEncode({Name="MarkerFile", Checkpoints=out})
@@ -143,9 +158,7 @@ local function save_file(name, checkpoints, overwrite)
     ensure_folder()
     local fn = sanitize_name(name)
     local path = file_path(fn)
-    if has_isfile and isfile(path) and not overwrite then
-        return false, "file exists"
-    end
+    if has_isfile and isfile(path) and not overwrite then return false, "file exists" end
     local data = serialize_checkpoints(checkpoints)
     local ok,err = pcall(writefile, path, data)
     if ok then index_add(fn .. ".json"); return true end
@@ -157,9 +170,9 @@ local function load_file(name)
     ensure_folder()
     local fn = sanitize_name(name)
     local path = file_path(fn)
-    local ok,content = pcall(readfile, path)
+    local ok, content = pcall(readfile, path)
     if not ok or not content or content == "" then return nil, "file missing/empty" end
-    local cps,err = deserialize_checkpoints(content)
+    local cps, err = deserialize_checkpoints(content)
     if not cps then return nil, err end
     return cps
 end
@@ -174,27 +187,7 @@ local function delete_saved(name)
     return true
 end
 
--- ========== Globals & Defaults ==========
-local Checkpoints = {
-    {Name="Spawn", Pos=Vector3.new(-925.52,371.61,37.74)},
-    {Name="Checkpoint 1", Pos=Vector3.new(-903.17,364.01,-428.28)},
-    {Name="Checkpoint 2", Pos=Vector3.new(-602.62,421.12,-545.52)},
-    {Name="Summit", Pos=Vector3.new(2496.26,2223.81,15.70)},
-}
-local CurrentCheckpoint = 1
-local AutoLoop = false
-local AutoOnce = false
-local IsRunning = false
-local AutoDelay = 1
-local AutoRespawn = false
-local TeleportYOffset = 5
-
--- ========== Small safe utilities ==========
-local function safe_wait(t)
-    if type(t) ~= "number" then t = 0.2 end
-    pcall(function() task.wait(t) end)
-end
-
+-- Teleport helper
 local function get_hrp()
     if not localPlayer then localPlayer = Players.LocalPlayer end
     if not localPlayer then return nil end
@@ -205,48 +198,52 @@ end
 
 local function teleport_to(pos)
     local hrp = get_hrp()
-    if hrp then
-        pcall(function()
-            hrp.CFrame = CFrame.new(pos + Vector3.new(0, TeleportYOffset, 0))
-        end)
+    if hrp then pcall(function() hrp.CFrame = CFrame.new(pos + Vector3.new(0,5,0)) end) end
+end
+
+-- Notification helper (use StarterGui SetCore if available)
+local function notify_default(title, text, duration)
+    duration = tonumber(duration) or 3
+    local success, _ = pcall(function()
+        StarterGui:SetCore("SendNotification", {Title = tostring(title or "Notification"), Text = tostring(text or ""); Duration = duration})
+    end)
+    if not success then
+        -- fallback: print or small on-gui status (we'll have status label)
+        warn("[MarkerSaver] "..tostring(title)..": "..tostring(text))
     end
 end
 
--- ========== UI Building ==========
-local function makeUI()
-    -- parent: try PlayerGui first, else CoreGui
+-- Build UI
+local function buildUI()
     local parent = (localPlayer and localPlayer:FindFirstChildOfClass("PlayerGui")) or game:GetService("CoreGui")
-    if not parent then warn("[MarkerSaver] No GUI parent"); return end
+    if not parent then error("No GUI parent") end
 
-    -- clear old
-    pcall(function()
-        local old = parent:FindFirstChild("MarkerSaverGUI")
-        if old then old:Destroy() end
-    end)
+    -- remove old if exists
+    pcall(function() local old=parent:FindFirstChild("MarkerSaverGUI"); if old then old:Destroy() end end)
 
     local screen = Instance.new("ScreenGui")
     screen.Name = "MarkerSaverGUI"
     screen.ResetOnSpawn = false
     screen.Parent = parent
 
-    -- main frame (compact)
+    -- main frame
     local frame = Instance.new("Frame", screen)
     frame.Name = "MainFrame"
     frame.Size = UDim2.new(0,380,0,300)
-    frame.Position = UDim2.new(0.5, -190, 0.45, -150)
-    frame.BackgroundColor3 = Color3.fromRGB(24,24,34)
+    frame.Position = UDim2.new(0.5,-190,0.45,-150)
+    frame.BackgroundColor3 = Color3.fromRGB(22,22,32)
     frame.BorderSizePixel = 0
     frame.Active = true
     frame.Draggable = true
-    Instance.new("UICorner", frame).CornerRadius = UDim.new(0,14)
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0,12)
 
     -- header
     local header = Instance.new("Frame", frame)
     header.Size = UDim2.new(1,0,0,36)
     header.Position = UDim2.new(0,0,0,0)
-    header.BackgroundColor3 = Color3.fromRGB(40,40,60)
+    header.BackgroundColor3 = Color3.fromRGB(44,44,64)
     header.BorderSizePixel = 0
-    Instance.new("UICorner", header).CornerRadius = UDim.new(0,14)
+    Instance.new("UICorner", header).CornerRadius = UDim.new(0,12)
 
     local title = Instance.new("TextLabel", header)
     title.Size = UDim2.new(1,-80,1,0)
@@ -254,25 +251,25 @@ local function makeUI()
     title.BackgroundTransparency = 1
     title.Text = "Marker Saver - DapzXPloit"
     title.Font = Enum.Font.GothamBold
-    title.TextColor3 = Color3.fromRGB(240,240,240)
     title.TextSize = 15
+    title.TextColor3 = Color3.fromRGB(240,240,240)
     title.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- minimize button (will minimize to bar)
+    -- minimize button
     local btnMin = Instance.new("TextButton", header)
     btnMin.Size = UDim2.new(0,36,0,28)
     btnMin.Position = UDim2.new(1,-44,0,4)
     btnMin.Text = "—"
     btnMin.Font = Enum.Font.GothamBold
     btnMin.TextSize = 20
-    btnMin.TextColor3 = Color3.new(1,1,1)
-    btnMin.BackgroundColor3 = Color3.fromRGB(90,90,110)
+    btnMin.TextColor3 = Color3.fromRGB(255,255,255)
+    btnMin.BackgroundColor3 = Color3.fromRGB(95,95,115)
     btnMin.BorderSizePixel = 0
-    Instance.new("UICorner", btnMin).CornerRadius = UDim.new(0,10)
+    Instance.new("UICorner", btnMin).CornerRadius = UDim.new(0,8)
 
-    -- status label
+    -- status label (fallback)
     local status = Instance.new("TextLabel", frame)
-    status.Size = UDim2.new(0.6,0,0,20)
+    status.Size = UDim2.new(0.6,0,0,18)
     status.Position = UDim2.new(0,12,0,42)
     status.BackgroundTransparency = 1
     status.Font = Enum.Font.Gotham
@@ -280,98 +277,105 @@ local function makeUI()
     status.TextColor3 = Color3.fromRGB(200,200,200)
     status.Text = ""
 
-    local function notify(txt, dur)
-        status.Text = tostring(txt or "")
-        dur = tonumber(dur) or 3
+    local function status_notify(str, t)
+        status.Text = tostring(str or "")
+        t = tonumber(t) or 3
         spawn(function()
-            local t0 = tick()
-            while tick()-t0 < dur do task.wait(0.1) end
-            if status.Text == txt then status.Text = "" end
+            local s = tick()
+            while tick()-s < t do task.wait(0.1) end
+            if status.Text == str then status.Text = "" end
         end)
     end
 
+    local function notify(title, text, dur)
+        -- primary: default notification
+        local ok = pcall(function()
+            StarterGui:SetCore("SendNotification", {Title = title, Text = text, Duration = dur or 3})
+        end)
+        if not ok then
+            -- fallback small status
+            status_notify("["..tostring(title).."] "..tostring(text), dur or 3)
+        end
+    end
+
     -- Buttons row 1
-    local function createBtn(p, text, x, y, col)
-        local b = Instance.new("TextButton", p)
-        b.Size = UDim2.new(0,110,0,34)
+    local function makeBtn(parent, txt, x, y, col)
+        local b = Instance.new("TextButton", parent)
+        b.Size = UDim2.new(0,112,0,34)
         b.Position = UDim2.new(0,x,0,y)
-        b.BackgroundColor3 = col or Color3.fromRGB(80,80,110)
+        b.BackgroundColor3 = col or Color3.fromRGB(75,75,105)
         b.Font = Enum.Font.GothamBold
         b.TextSize = 13
-        b.Text = text
-        b.TextColor3 = Color3.new(1,1,1)
+        b.Text = txt
+        b.TextColor3 = Color3.fromRGB(255,255,255)
         b.BorderSizePixel = 0
         Instance.new("UICorner", b).CornerRadius = UDim.new(0,8)
-        -- hover tween
+        -- hover effect
         b.MouseEnter:Connect(function()
-            pcall(function()
-                TweenService:Create(b, TweenInfo.new(0.12), {BackgroundColor3 = b.BackgroundColor3:Lerp(Color3.fromRGB(255,255,255), 0.03)}):Play()
-            end)
+            pcall(function() TweenService:Create(b, TweenInfo.new(0.12), {BackgroundColor3 = b.BackgroundColor3:Lerp(Color3.fromRGB(255,255,255), 0.03)}):Play() end)
         end)
         b.MouseLeave:Connect(function()
-            pcall(function()
-                TweenService:Create(b, TweenInfo.new(0.12), {BackgroundColor3 = col}):Play()
-            end)
+            pcall(function() TweenService:Create(b, TweenInfo.new(0.12), {BackgroundColor3 = col}):Play() end)
         end)
         return b
     end
 
-    local btnAuto = createBtn(frame, "⛳ AutoLoop OFF", 10, 66, Color3.fromRGB(200,70,70))
-    local btnSaveCP = createBtn(frame, "📍 Save CP", 137, 66, Color3.fromRGB(70,120,200))
-    local btnDelAll = createBtn(frame, "🗑️ Delete All", 264, 66, Color3.fromRGB(200,120,60))
+    local btnAuto = makeBtn(frame, "⛳ AutoLoop OFF", 10, 66, Color3.fromRGB(190,70,70))
+    local btnSaveCP = makeBtn(frame, "📍 Save CP", 136, 66, Color3.fromRGB(70,120,200))
+    local btnDelAll = makeBtn(frame, "🗑️ Delete All", 262, 66, Color3.fromRGB(200,120,60))
 
-    -- Buttons row 2 + save name input
-    local inputLabel = Instance.new("TextLabel", frame)
-    inputLabel.Size = UDim2.new(0,110,0,18)
-    inputLabel.Position = UDim2.new(0,12,0,108)
-    inputLabel.BackgroundTransparency = 1
-    inputLabel.Font = Enum.Font.GothamBold
-    inputLabel.TextSize = 12
-    inputLabel.TextColor3 = Color3.fromRGB(220,220,220)
-    inputLabel.Text = "Masukkan nama file..."
+    -- Save box
+    local lblSave = Instance.new("TextLabel", frame)
+    lblSave.Size = UDim2.new(0,120,0,18)
+    lblSave.Position = UDim2.new(0,12,0,106)
+    lblSave.BackgroundTransparency = 1
+    lblSave.Text = "Masukkan nama file"
+    lblSave.Font = Enum.Font.GothamBold
+    lblSave.TextSize = 12
+    lblSave.TextColor3 = Color3.fromRGB(220,220,220)
 
     local inputBox = Instance.new("TextBox", frame)
-    inputBox.Size = UDim2.new(0,220,0,24)
-    inputBox.Position = UDim2.new(0,135,0,104)
-    inputBox.BackgroundColor3 = Color3.fromRGB(38,38,50)
+    inputBox.Size = UDim2.new(0,210,0,24)
+    inputBox.Position = UDim2.new(0,136,0,102)
+    inputBox.BackgroundColor3 = Color3.fromRGB(36,36,48)
     inputBox.TextColor3 = Color3.fromRGB(240,240,240)
     inputBox.Font = Enum.Font.Gotham
     inputBox.TextSize = 13
     inputBox.PlaceholderText = "Contoh: MarVGunungPertama"
     Instance.new("UICorner", inputBox).CornerRadius = UDim.new(0,6)
 
-    local btnSaveFile = createBtn(frame, "💾 Save Sekarang", 12, 138, Color3.fromRGB(90,150,220))
-    local btnLoadFile = createBtn(frame, "📂 Load Sekarang", 137, 138, Color3.fromRGB(80,190,140))
-    local btnCopyAll = createBtn(frame, "📋 Copy All", 264, 138, Color3.fromRGB(130,110,200))
+    local btnSaveFile = makeBtn(frame, "💾 Save Sekarang", 12, 138, Color3.fromRGB(90,150,220))
+    local btnLoadFile = makeBtn(frame, "📂 Load Sekarang", 136, 138, Color3.fromRGB(80,190,140))
+    local btnPickSave = makeBtn(frame, "Pilih File ▼", 262, 138, Color3.fromRGB(120,120,140))
 
-    -- Delay input
+    -- Delay / Respawn / Copy All
     local lblDelay = Instance.new("TextLabel", frame)
     lblDelay.Size = UDim2.new(0,70,0,18)
     lblDelay.Position = UDim2.new(0,12,0,178)
     lblDelay.BackgroundTransparency = 1
+    lblDelay.Text = "Delay (s)"
     lblDelay.Font = Enum.Font.GothamBold
     lblDelay.TextSize = 12
     lblDelay.TextColor3 = Color3.fromRGB(220,220,220)
-    lblDelay.Text = "Delay (s):"
 
     local delayBox = Instance.new("TextBox", frame)
     delayBox.Size = UDim2.new(0,60,0,22)
     delayBox.Position = UDim2.new(0,90,0,174)
-    delayBox.BackgroundColor3 = Color3.fromRGB(38,38,50)
+    delayBox.BackgroundColor3 = Color3.fromRGB(36,36,48)
     delayBox.TextColor3 = Color3.fromRGB(240,240,240)
     delayBox.Font = Enum.Font.Gotham
     delayBox.TextSize = 13
     delayBox.Text = tostring(AutoDelay)
     Instance.new("UICorner", delayBox).CornerRadius = UDim.new(0,6)
 
-    local respawnBtn = createBtn(frame, "♻️ Respawn OFF", 182, 174, Color3.fromRGB(200,170,60))
-    local autosaveBtn = createBtn(frame, "Autosave OFF", 264, 174, Color3.fromRGB(110,110,110))
+    local btnRespawn = makeBtn(frame, "♻️ Respawn OFF", 180, 174, Color3.fromRGB(200,170,60))
+    local btnCopyAll = makeBtn(frame, "📋 Copy All", 260, 174, Color3.fromRGB(130,110,200))
 
-    -- scroll area for checkpoints
+    -- checkpoint scroll
     local scroll = Instance.new("ScrollingFrame", frame)
-    scroll.Size = UDim2.new(1,-28,0,92)
+    scroll.Size = UDim2.new(1,-24,0,96)
     scroll.Position = UDim2.new(0,12,0,206)
-    scroll.BackgroundColor3 = Color3.fromRGB(34,34,46)
+    scroll.BackgroundColor3 = Color3.fromRGB(30,30,40)
     scroll.BorderSizePixel = 0
     scroll.ScrollBarThickness = 8
     Instance.new("UICorner", scroll).CornerRadius = UDim.new(0,8)
@@ -382,278 +386,213 @@ local function makeUI()
     layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
     layout.SortOrder = Enum.SortOrder.LayoutOrder
 
-    -- helper small button for cp rows
-    local function smallBtn(parent, txt, w, color)
-        local b = Instance.new("TextButton", parent)
-        b.Size = UDim2.new(0,w or 72,0,26)
-        b.BackgroundColor3 = color or Color3.fromRGB(100,170,120)
-        b.Font = Enum.Font.GothamBold
-        b.Text = txt
-        b.TextSize = 13
-        b.TextColor3 = Color3.new(1,1,1)
-        b.BorderSizePixel = 0
-        Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
-        return b
-    end
-
-    -- populate checkpoint list
+    -- populating cp list
     local function refresh_cp_list()
-        -- remove old rows
         for _,c in ipairs(scroll:GetChildren()) do
             if not c:IsA("UIListLayout") then pcall(function() c:Destroy() end) end
         end
         for i,cp in ipairs(Checkpoints) do
             local row = Instance.new("Frame", scroll)
             row.Size = UDim2.new(1,-12,0,28)
-            row.BackgroundTransparency = 1
             row.LayoutOrder = i
+            row.BackgroundTransparency = 1
 
             local nameLbl = Instance.new("TextLabel", row)
             nameLbl.Size = UDim2.new(0.5,0,1,0)
             nameLbl.Position = UDim2.new(0,6,0,0)
             nameLbl.BackgroundTransparency = 1
-            nameLbl.Text = cp.Name or ("Checkpoint "..i)
             nameLbl.Font = Enum.Font.GothamBold
+            nameLbl.Text = tostring(cp.Name or ("Checkpoint "..i))
             nameLbl.TextSize = 13
             nameLbl.TextColor3 = Color3.fromRGB(235,235,235)
             nameLbl.TextXAlignment = Enum.TextXAlignment.Left
 
-            local tp = smallBtn(row, "TP", 56, Color3.fromRGB(60,170,90))
-            tp.Position = UDim2.new(0.5, 6, 0, 1)
-            tp.MouseButton1Click:Connect(function()
+            local tpBtn = Instance.new("TextButton", row)
+            tpBtn.Size = UDim2.new(0,56,0,24)
+            tpBtn.Position = UDim2.new(0.5, 6, 0, 2)
+            tpBtn.Text = "TP"
+            tpBtn.Font = Enum.Font.GothamBold
+            tpBtn.TextSize = 12
+            tpBtn.BackgroundColor3 = Color3.fromRGB(70,160,90)
+            tpBtn.TextColor3 = Color3.new(1,1,1)
+            Instance.new("UICorner", tpBtn).CornerRadius = UDim.new(0,6)
+            tpBtn.MouseButton1Click:Connect(function()
                 teleport_to(cp.Pos)
-                notify("Teleported to "..tostring(cp.Name), 1.2)
-                CurrentCheckpoint = i
+                notify("Teleport", "Teleported to "..tostring(cp.Name), 2)
             end)
 
-            local edit = smallBtn(row, "EDIT", 56, Color3.fromRGB(200,180,60))
-            edit.Position = UDim2.new(0.5, 70, 0, 1)
-            edit.MouseButton1Click:Connect(function()
+            local editBtn = Instance.new("TextButton", row)
+            editBtn.Size = UDim2.new(0,56,0,24)
+            editBtn.Position = UDim2.new(0.5,68,0,2)
+            editBtn.Text = "EDIT"
+            editBtn.Font = Enum.Font.GothamBold
+            editBtn.TextSize = 12
+            editBtn.BackgroundColor3 = Color3.fromRGB(200,170,60)
+            editBtn.TextColor3 = Color3.new(1,1,1)
+            Instance.new("UICorner", editBtn).CornerRadius = UDim.new(0,6)
+            editBtn.MouseButton1Click:Connect(function()
                 local hrp = get_hrp()
-                if not hrp then notify("Karakter tidak tersedia",2); return end
+                if not hrp then notify("Edit", "Character not available", 2); return end
                 Checkpoints[i].Pos = hrp.Position
                 Checkpoints[i].Name = tostring(Checkpoints[i].Name or ("Checkpoint "..i)) .. " (edited)"
-                notify("Checkpoint "..i.." updated",1.5)
+                notify("Edit", "Checkpoint updated", 1.5)
                 refresh_cp_list()
             end)
 
-            local del = smallBtn(row, "DEL", 56, Color3.fromRGB(200,80,80))
-            del.Position = UDim2.new(0.78, -10, 0, 1)
-            del.MouseButton1Click:Connect(function()
+            local delBtn = Instance.new("TextButton", row)
+            delBtn.Size = UDim2.new(0,56,0,24)
+            delBtn.Position = UDim2.new(0.78,-10,0,2)
+            delBtn.Text = "DEL"
+            delBtn.Font = Enum.Font.GothamBold
+            delBtn.TextSize = 12
+            delBtn.BackgroundColor3 = Color3.fromRGB(200,80,80)
+            delBtn.TextColor3 = Color3.new(1,1,1)
+            Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0,6)
+            delBtn.MouseButton1Click:Connect(function()
                 table.remove(Checkpoints, i)
-                notify("Checkpoint "..i.." removed",1.1)
+                notify("Delete", "Checkpoint removed", 1.2)
                 refresh_cp_list()
             end)
         end
-        scroll.CanvasSize = UDim2.new(0,0,0, (math.max(0,#Checkpoints) * 36))
+        scroll.CanvasSize = UDim2.new(0,0,0, math.max(0,#Checkpoints * 36))
     end
 
-    -- initial populate
     refresh_cp_list()
 
-    -- ========== Button behaviors (core) ==========
-    btnSaveCP.MouseButton1Click:Connect(function()
-        local hrp = get_hrp()
-        if not hrp then notify("Karakter tidak tersedia",2); return end
-        local idx = #Checkpoints + 1
-        local name = "Checkpoint "..tostring(idx)
-        table.insert(Checkpoints, {Name = name, Pos = hrp.Position})
-        refresh_cp_list()
-        notify("Saved "..name,1.3)
-    end)
+    -- Dropdown helper (small)
+    local function makeDropdown(anchorInstance, optionsFunc, onSelect)
+        -- removes existing dropdown if any
+        local parent = screen
+        if parent:FindFirstChild("MarkerDropdown") then parent:FindFirstChild("MarkerDropdown"):Destroy() end
 
-    btnDelAll.MouseButton1Click:Connect(function()
-        Checkpoints = {}
-        refresh_cp_list()
-        notify("All checkpoints removed",1.2)
-    end)
+        local absPos = anchorInstance.AbsolutePosition
+        local absSize = anchorInstance.AbsoluteSize
 
-    btnAuto.MouseButton1Click:Connect(function()
-        AutoLoop = not AutoLoop
-        btnAuto.Text = AutoLoop and "⏸️ AutoLoop ON" or "⛳ AutoLoop OFF"
-        btnAuto.BackgroundColor3 = AutoLoop and Color3.fromRGB(80,200,100) or Color3.fromRGB(200,70,70)
-        if AutoLoop then
-            spawn(function()
-                IsRunning = true
-                CurrentCheckpoint = 1
-                while AutoLoop do
-                    local cp = Checkpoints[CurrentCheckpoint]
-                    if cp and cp.Pos then
-                        teleport_to(cp.Pos)
-                    end
-                    safe_wait(AutoDelay + math.random()*0.2)
-                    if CurrentCheckpoint >= #Checkpoints then
-                        if AutoRespawn then
-                            pcall(function() if localPlayer and localPlayer.Character then localPlayer.Character:BreakJoints() end end)
-                            if localPlayer then localPlayer.CharacterAdded:Wait() end
-                            safe_wait(0.1)
-                        end
-                        CurrentCheckpoint = 1
-                    else
-                        CurrentCheckpoint = CurrentCheckpoint + 1
-                    end
-                    task.wait(0.05)
-                end
-                IsRunning = false
-            end)
-        end
-    end)
+        local dropdown = Instance.new("Frame", parent)
+        dropdown.Name = "MarkerDropdown"
+        dropdown.Size = UDim2.new(0, 240, 0, 24)
+        dropdown.Position = UDim2.new(0, absPos.X - 6, 0, absPos.Y + absSize.Y + 4)
+        dropdown.BackgroundColor3 = Color3.fromRGB(28,28,36)
+        dropdown.BorderSizePixel = 0
+        dropdown.ZIndex = 100
+        Instance.new("UICorner", dropdown).CornerRadius = UDim.new(0,8)
+        dropdown.Active = true
 
-    respawnBtn.MouseButton1Click:Connect(function()
-        AutoRespawn = not AutoRespawn
-        respawnBtn.Text = AutoRespawn and "♻️ Respawn ON" or "♻️ Respawn OFF"
-        notify("Respawn "..(AutoRespawn and "enabled" or "disabled"),1.2)
-    end)
+        local list = Instance.new("ScrollingFrame", dropdown)
+        list.Size = UDim2.new(1, -8, 0, 160)
+        list.Position = UDim2.new(0,4,0,4)
+        list.BackgroundTransparency = 1
+        list.ScrollBarThickness = 8
+        Instance.new("UICorner", list).CornerRadius = UDim.new(0,6)
+        list.ZIndex = 101
 
-    delayBox.FocusLost:Connect(function(enter)
-        local v = tonumber(delayBox.Text)
-        if v and v > 0 then AutoDelay = v; delayBox.Text = tostring(v); notify("Delay set to "..tostring(v),1)
-        else delayBox.Text = tostring(AutoDelay); notify("Invalid delay",1) end
-    end)
+        local layout = Instance.new("UIListLayout", list)
+        layout.Padding = UDim.new(0,6)
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
 
-    autosaveBtn.MouseButton1Click:Connect(function()
-        -- simple autosave toggle, default OFF; save to autosave timestamp file
-        local enabled = autosaveBtn:GetAttribute("Enabled") or false
-        enabled = not enabled
-        autosaveBtn:SetAttribute("Enabled", enabled)
-        autosaveBtn.Text = enabled and "Autosave ON" or "Autosave OFF"
-        autosaveBtn.BackgroundColor3 = enabled and Color3.fromRGB(80,150,80) or Color3.fromRGB(110,110,110)
-        notify("Autosave "..(enabled and "enabled" or "disabled"),1.2)
-        if enabled then
-            spawn(function()
-                while autosaveBtn:GetAttribute("Enabled") do
-                    task.wait(10)
-                    if has_writefile then
-                        local ok,err = pcall(function() save_file("Autosave_"..tostring(os.time()), Checkpoints, true) end)
-                    else
-                        -- fallback: copy JSON to clipboard
-                        if can_clipboard then pcall(function() if setclipboard then setclipboard(serialize_checkpoints(Checkpoints)) elseif toclipboard then toclipboard(serialize_checkpoints(Checkpoints)) end end) end
-                    end
-                end
-            end)
-        end
-    end)
-
-    btnSaveFile.MouseButton1Click:Connect(function()
-        local name = tostring(inputBox.Text or "")
-        if name == "" then notify("Masukkan nama file terlebih dahulu",2); return end
-        if has_writefile then
-            local ok, err = pcall(function() return save_file(name, Checkpoints, true) end)
-            if ok then notify("Saved: "..tostring(name),2); pcall(function() writefile(LAST_PATH, name) end)
-            else notify("Save failed: "..tostring(err),3) end
-        else
-            local js = serialize_checkpoints(Checkpoints)
-            if can_clipboard then
-                pcall(function() if setclipboard then setclipboard(js) elseif toclipboard then toclipboard(js) end end)
-                notify("No writefile. JSON copied to clipboard",4)
-            else
-                notify("No writefile & no clipboard available",4)
-            end
-        end
-    end)
-
-    -- Popup for file selector (Load)
-    local function showLoadPopup()
-        -- overlay
-        local overlay = Instance.new("Frame", screen)
-        overlay.Size = UDim2.new(1,0,1,0)
-        overlay.Position = UDim2.new(0,0,0,0)
-        overlay.BackgroundTransparency = 0.5
-        overlay.BackgroundColor3 = Color3.fromRGB(8,8,12)
-        overlay.ZIndex = 50
-
-        local popup = Instance.new("Frame", overlay)
-        popup.Size = UDim2.new(0,300,0,260)
-        popup.Position = UDim2.new(0.5,-150,0.5,-130)
-        popup.BackgroundColor3 = Color3.fromRGB(28,28,38)
-        popup.BorderSizePixel = 0
-        popup.ZIndex = 51
-        Instance.new("UICorner", popup).CornerRadius = UDim.new(0,12)
-        popup.Active = true
-        popup.Draggable = true
-
-        local heading = Instance.new("TextLabel", popup)
-        heading.Size = UDim2.new(1, -24, 0, 36)
-        heading.Position = UDim2.new(0,12,0,8)
-        heading.BackgroundTransparency = 1
-        heading.Text = "📂 Pilih File untuk Dimuat"
-        heading.Font = Enum.Font.GothamBold
-        heading.TextColor3 = Color3.new(1,1,1)
-        heading.TextSize = 15
-        heading.TextXAlignment = Enum.TextXAlignment.Left
-
-        local closeBtn = Instance.new("TextButton", popup)
-        closeBtn.Size = UDim2.new(0,28,0,28)
-        closeBtn.Position = UDim2.new(1, -40, 0, 6)
-        closeBtn.BackgroundColor3 = Color3.fromRGB(140,60,60)
-        closeBtn.Text = "X"
-        closeBtn.Font = Enum.Font.GothamBold
-        closeBtn.TextColor3 = Color3.new(1,1,1)
-        Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0,8)
-
-        local listFrame = Instance.new("ScrollingFrame", popup)
-        listFrame.Size = UDim2.new(1, -24, 1, -64)
-        listFrame.Position = UDim2.new(0,12,0,48)
-        listFrame.BackgroundTransparency = 1
-        listFrame.ScrollBarThickness = 8
-        listFrame.CanvasSize = UDim2.new(0,0,0,0)
-        listFrame.ZIndex = 51
-
-        local lfLayout = Instance.new("UIListLayout", listFrame)
-        lfLayout.Padding = UDim.new(0,6)
-        lfLayout.FillDirection = Enum.FillDirection.Vertical
-        lfLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-        -- populate list with saved files
-        local files = list_saved_files()
-        if #files == 0 then
-            local info = Instance.new("TextLabel", listFrame)
-            info.Size = UDim2.new(1, -20, 0, 28)
+        local options = optionsFunc() or {}
+        if #options == 0 then
+            dropdown.Size = UDim2.new(0,240,0,40)
+            list.Size = UDim2.new(1,-8,0,28)
+            local info = Instance.new("TextLabel", list)
+            info.Size = UDim2.new(1,0,1,0)
             info.BackgroundTransparency = 1
             info.Text = "Belum ada file tersimpan."
             info.Font = Enum.Font.Gotham
             info.TextColor3 = Color3.fromRGB(200,200,200)
             info.TextSize = 13
-            info.LayoutOrder = 1
         else
-            for i,f in ipairs(files) do
-                local btn = Instance.new("TextButton", listFrame)
-                btn.Size = UDim2.new(1, -20, 0, 32)
-                btn.Position = UDim2.new(0,10,0, (i-1)*38)
-                btn.BackgroundColor3 = Color3.fromRGB(46,46,60)
+            for i,f in ipairs(options) do
+                local btn = Instance.new("TextButton", list)
+                btn.Size = UDim2.new(1, -12, 0, 28)
+                btn.Position = UDim2.new(0,6,0,(i-1)*34)
+                btn.BackgroundColor3 = Color3.fromRGB(40,40,52)
                 btn.Font = Enum.Font.GothamBold
-                btn.TextColor3 = Color3.new(1,1,1)
+                btn.TextColor3 = Color3.fromRGB(240,240,240)
                 btn.TextSize = 13
                 btn.Text = f:gsub("%.json$","")
                 btn.AutoButtonColor = true
-                Instance.new("UICorner", btn).CornerRadius = UDim.new(0,8)
+                Instance.new("UICorner", btn).CornerRadius = UDim.new(0,6)
                 btn.LayoutOrder = i
 
                 btn.MouseButton1Click:Connect(function()
-                    -- load file
-                    local name = btn.Text
-                    local cps, err = load_file(name)
-                    if not cps then
-                        notify("Load failed: "..tostring(err), 3)
-                    else
-                        Checkpoints = cps
-                        refresh_cp_list()
-                        notify("Loaded "..name, 2)
-                        -- save last
-                        if has_writefile then pcall(function() writefile(LAST_PATH, name) end) end
-                    end
-                    overlay:Destroy()
+                    -- call select callback
+                    onSelect(btn.Text)
+                    -- destroy dropdown
+                    pcall(function() dropdown:Destroy() end)
                 end)
             end
+            -- set size based on count (max 6 items visible)
+            local visible = math.min(#options, 6)
+            dropdown.Size = UDim2.new(0,240,0, 8 + visible * 34)
+            list.Size = UDim2.new(1,-8,0, visible * 34)
         end
 
-        closeBtn.MouseButton1Click:Connect(function() overlay:Destroy() end)
-        -- update canvas size
-        listFrame.CanvasSize = UDim2.new(0,0,0, lfLayout.AbsoluteContentSize.Y + 12)
+        -- click outside to close
+        local conn
+        conn = screen.InputBegan:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                local pos = inp.Position
+                local gx, gy = pos.X, pos.Y
+                local p0 = dropdown.AbsolutePosition
+                local s0 = dropdown.AbsoluteSize
+                if not (gx >= p0.X and gx <= p0.X + s0.X and gy >= p0.Y and gy <= p0.Y + s0.Y) then
+                    pcall(function() dropdown:Destroy() end)
+                    conn:Disconnect()
+                end
+            end
+        end)
+        return dropdown
     end
 
-    btnLoadFile.MouseButton1Click:Connect(function()
-        showLoadPopup()
+    -- Button behaviors
+    btnSaveCP.MouseButton1Click:Connect(function()
+        local hrp = get_hrp()
+        if not hrp then notify("Save CP", "Character not available", 2); return end
+        local idx = #Checkpoints + 1
+        local name = "Checkpoint "..idx
+        table.insert(Checkpoints, {Name = name, Pos = hrp.Position})
+        refresh_cp_list()
+        notify("Save CP", "Checkpoint saved: "..name, 2)
+    end)
+
+    btnDelAll.MouseButton1Click:Connect(function()
+        Checkpoints = {}
+        refresh_cp_list()
+        notify("Delete All", "All checkpoints removed", 2)
+    end)
+
+    btnAuto.MouseButton1Click:Connect(function()
+        AutoLoop = not AutoLoop
+        btnAuto.Text = AutoLoop and "⏸️ AutoLoop ON" or "⛳ AutoLoop OFF"
+        btnAuto.BackgroundColor3 = AutoLoop and Color3.fromRGB(80,200,100) or Color3.fromRGB(190,70,70)
+        if AutoLoop then
+            spawn(function()
+                local i = 1
+                while AutoLoop do
+                    local cp = Checkpoints[i]
+                    if cp and cp.Pos then teleport_to(cp.Pos) end
+                    safe_wait(AutoDelay)
+                    i = i + 1
+                    if i > #Checkpoints then
+                        if AutoRespawn then pcall(function() if localPlayer and localPlayer.Character then localPlayer.Character:BreakJoints() end end); if localPlayer then localPlayer.CharacterAdded:Wait() end end
+                        i = 1
+                    end
+                end
+            end)
+        end
+    end)
+
+    btnRespawn.MouseButton1Click:Connect(function()
+        AutoRespawn = not AutoRespawn
+        btnRespawn.Text = AutoRespawn and "♻️ Respawn ON" or "♻️ Respawn OFF"
+        notify("Respawn", AutoRespawn and "Enabled" or "Disabled", 1.4)
+    end)
+
+    delayBox.FocusLost:Connect(function()
+        local v = tonumber(delayBox.Text)
+        if v and v > 0 then AutoDelay = v; delayBox.Text = tostring(v); notify("Delay", "Delay set to "..tostring(v),1.2)
+        else delayBox.Text = tostring(AutoDelay); notify("Delay", "Invalid value",1.2) end
     end)
 
     btnCopyAll.MouseButton1Click:Connect(function()
@@ -663,54 +602,79 @@ local function makeUI()
             table.insert(lines, string.format('{Name = "%s", Pos = Vector3.new(%.4f, %.4f, %.4f)},', cp.Name or ("CP_"..i), p.X, p.Y, p.Z))
         end
         local txt = table.concat(lines, "\n")
-        if can_clipboard then pcall(function() if setclipboard then setclipboard(txt) elseif toclipboard then toclipboard(txt) end end); notify("Formatted checkpoints copied",2)
-        else notify("Clipboard not available",2) end
+        if can_clipboard then pcall(function() if setclipboard then setclipboard(txt) elseif toclipboard then toclipboard(txt) end end); notify("Copy", "Formatted checkpoints copied",2)
+        else notify("Copy", "Clipboard not available",2) end
     end)
 
-    -- load last file automatically if exists
-    pcall(function()
-        if has_readfile then
-            local ok, last = pcall(readfile, LAST_PATH)
-            if ok and last and last ~= "" then
-                local cps = select(1, pcall(load_file, last))
-                if type(cps) == "table" then Checkpoints = cps; refresh_cp_list(); notify("Auto-loaded "..tostring(last),2) end
-            end
+    -- Save file: dropdown fill
+    btnPickSave.MouseButton1Click:Connect(function()
+        makeDropdown(btnPickSave, list_saved_files, function(selected)
+            inputBox.Text = tostring(selected)
+            notify("File Selected", selected, 1.2)
+        end)
+    end)
+
+    btnSaveFile.MouseButton1Click:Connect(function()
+        local name = tostring(inputBox.Text or "")
+        if name == "" then notify("Save", "Masukkan nama file terlebih dahulu",2); return end
+        if has_writefile then
+            local ok,err = pcall(function() return save_file(name, Checkpoints, true) end)
+            if ok then notify("Save", "Saved: "..tostring(name),2)
+            else notify("Save", "Failed: "..tostring(err),3) end
+        else
+            local js = serialize_checkpoints(Checkpoints)
+            if can_clipboard then pcall(function() if setclipboard then setclipboard(js) elseif toclipboard then toclipboard(js) end end); notify("Save", "No writefile — JSON copied to clipboard",4)
+            else notify("Save", "No writefile & no clipboard",4) end
         end
     end)
 
-    -- ========== Minimize system (draggable bar) ==========
+    -- Load file: dropdown then load
+    btnLoadFile.MouseButton1Click:Connect(function()
+        makeDropdown(btnLoadFile, list_saved_files, function(selected)
+            local cps, err = load_file(selected)
+            if not cps then notify("Load", "Failed: "..tostring(err),3) return end
+            Checkpoints = cps
+            refresh_cp_list()
+            notify("Load", "Loaded "..tostring(selected),2)
+        end)
+    end)
+
+    -- try auto-load last (NOT auto-enabled per your request) - skipped
+
+    -- Minimize system
     local minimized = false
     local miniBar = Instance.new("Frame", screen)
-    miniBar.Size = UDim2.new(0,240,0,44)
-    miniBar.Position = UDim2.new(0.5, -120, 0.06, 0)
+    miniBar.Name = "MiniBar"
+    miniBar.Size = UDim2.new(0,260,0,44)
+    miniBar.Position = UDim2.new(0.5,-130,0.06,0)
     miniBar.AnchorPoint = Vector2.new(0.5,0)
-    miniBar.BackgroundColor3 = Color3.fromRGB(42,42,62)
+    miniBar.BackgroundColor3 = Color3.fromRGB(46,46,66)
     miniBar.BorderSizePixel = 0
-    miniBar.ZIndex = 80
-    Instance.new("UICorner", miniBar).CornerRadius = UDim.new(0,22)
+    miniBar.ZIndex = 90
     miniBar.Active = true
     miniBar.Draggable = true
+    Instance.new("UICorner", miniBar).CornerRadius = UDim.new(0,22)
     miniBar.Visible = false
 
     local miniLabel = Instance.new("TextLabel", miniBar)
-    miniLabel.Size = UDim2.new(1,-12,1,0)
-    miniLabel.Position = UDim2.new(0,8,0,0)
+    miniLabel.Size = UDim2.new(1,-16,1,0)
+    miniLabel.Position = UDim2.new(0,12,0,0)
     miniLabel.BackgroundTransparency = 1
     miniLabel.Text = "🌈 DapzXPloit - Tools Mount"
     miniLabel.Font = Enum.Font.GothamBold
     miniLabel.TextSize = 14
-    miniLabel.TextColor3 = Color3.new(1,1,1)
+    miniLabel.TextColor3 = Color3.fromRGB(240,240,240)
     miniLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- subtle stroke (rgb cycling)
+    -- stroke RGB
     local stroke = Instance.new("UIStroke", miniBar)
-    stroke.Thickness = 1.2
-    stroke.Color = Color3.fromRGB(150,150,255)
+    stroke.Thickness = 1.3
+    stroke.Color = Color3.fromRGB(160,160,255)
 
     -- animate stroke color slowly (non-blocking)
     spawn(function()
         while miniBar and miniBar.Parent do
-            for h=0,1,0.02 do
+            for h = 0, 1, 0.02 do
                 if not miniBar.Parent then return end
                 stroke.Color = Color3.fromHSV(h, 0.6, 1)
                 safe_wait(0.03)
@@ -718,18 +682,17 @@ local function makeUI()
         end
     end)
 
-    -- minimize action
+    -- minimize behavior
     btnMin.MouseButton1Click:Connect(function()
         if minimized then return end
         minimized = true
-        -- tween scale/alpha
-        TweenService:Create(frame, TweenInfo.new(0.28, Enum.EasingStyle.Quad), {Size = UDim2.new(0,380,0,0), Position = UDim2.new(0.5, -190, 0.45, -150)}):Play()
+        TweenService:Create(frame, TweenInfo.new(0.28, Enum.EasingStyle.Quad), {Size = UDim2.new(0,380,0,0)}):Play()
         wait(0.28)
         frame.Visible = false
         miniBar.Visible = true
     end)
 
-    -- clicking miniBar restores
+    -- restore behavior (click or drag end)
     miniBar.InputBegan:Connect(function(inp)
         if inp.UserInputType == Enum.UserInputType.MouseButton1 then
             if not minimized then return end
@@ -737,30 +700,19 @@ local function makeUI()
             miniBar.Visible = false
             frame.Visible = true
             frame.Size = UDim2.new(0,380,0,0)
-            frame.Position = UDim2.new(0.5, -190, 0.45, -150)
             TweenService:Create(frame, TweenInfo.new(0.28, Enum.EasingStyle.Quad), {Size = UDim2.new(0,380,0,300)}):Play()
         end
     end)
 
-    -- make miniBar draggable but confined: already draggable via property
-    -- ensure text isn't clipped by decreasing main font if necessary (already sized)
-
-    -- return controls if needed
+    -- return api if needed
     return {
-        Refresh = refresh_cp_list,
-        Notify = notify,
         Screen = screen,
         Frame = frame,
-        MiniBar = miniBar
+        MiniBar = miniBar,
+        Notify = notify
     }
 end
 
--- ========== Build and expose ==========
-local ok, res = pcall(makeUI)
-if not ok then
-    warn("[MarkerSaver] UI build failed:", res)
-else
-    print("[MarkerSaver] UI ready.")
-end
-
--- end of file
+-- Run
+local ok, ret = pcall(buildUI)
+if not ok then warn("[MarkerSaver] UI build failed:", ret) else print("[MarkerSaver] Ready (V3.5)") end
