@@ -4,7 +4,7 @@
 -- =========================
 
 -- Ganti webhook URL mu disini
-local webhookURL = "https://discord.com/api/webhooks/1421153532861747230/npCLU35K2XPTMgo7HTD26_nRjR8gwYOD3GianMN3A9IPgI9FhBX73lw6y6_fSRQGKVWl"
+local webhookURL = "https://discord.com/api/webhooks/142115861747230/npCLU3TMgoA9IPgI9FhBX73lw6y6_fSRQGKVWl"
 
 -- Services (utama)
 local Players = game:GetService("Players")
